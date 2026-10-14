@@ -1,6 +1,10 @@
 # Chronos 闹钟（深蓝科技风桌面版）
 
+![Chronos 闹钟图标](icon/appicon.png)
+
 基于资料库「闹钟」文件夹中的 **Chronos 深蓝科技风设计系统** 改造而来的桌面闹钟软件。
+
+GitHub 仓库：[https://github.com/Wang-Yi-Hao/chronos-alarm](https://github.com/Wang-Yi-Hao/chronos-alarm)
 用 `pywebview` 原生窗口承载这套 HTML/CSS UI，后端复用原 Windows 闹钟的核心逻辑
 （Windows Toast 通知、`alarms.json` 持久化、单实例锁、贪睡）。
 
@@ -57,6 +61,7 @@ chronos/
 ├── requirements.txt
 ├── build.spec         # PyInstaller onedir 配置
 ├── run.bat / build.bat
+├── icon/              # 闹钟图标（appicon.ico / appicon.png / make_icon.py）
 └── ui/
     ├── index.html     # 五视图结构：时钟/闹钟/新建表单/计时/秒表
     ├── style.css      # Chronos 深蓝科技风设计系统
