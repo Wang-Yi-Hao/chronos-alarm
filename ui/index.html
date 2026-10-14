@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta content="width=device-width, initial-scale=1.0" name="viewport">
+<title>Chronos · 闹钟</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="app">
+    <!-- ===== 侧边导航 ===== -->
+    <aside class="sidebar">
+      <div class="brand">C</div>
+      <button class="nav-btn active" data-view="clock" title="时钟">
+        <svg fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+        <span class="lbl">时钟</span>
+      </button>
+      <button class="nav-btn" data-view="alarms" title="闹钟">
+        <svg fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path d="M3 14l1.5-3a7 7 0 0112-2l1.5 3"/><path d="M3 14h3l2-1M21 10l-3 1"/><path d="M12 14v4l2 2"/></svg>
+        <span class="lbl">闹钟</span>
+      </button>
+      <button class="nav-btn" data-view="timer" title="计时">
+        <svg fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><circle cx="12" cy="13" r="8"/><path d="M12 13V9M9 2h6"/></svg>
+        <span class="lbl">计时</span>
+      </button>
+      <button class="nav-btn" data-view="stopwatch" title="秒表">
+        <svg fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><circle cx="12" cy="13" r="8"/><path d="M12 13l3-3M9 2h6M12 2v3"/></svg>
+        <span class="lbl">秒表</span>
+      </button>
+      <div class="nav-spacer"></div>
+      <div class="nav-avatar">W</div>
+    </aside>
+
+    <!-- ===== 主区 ===== -->
+    <main class="main">
+      <div class="topbar">
+        <div>
+          <h1 id="viewTitle">世界时钟</h1>
+          <div class="sub" id="viewSub">CHRONOS · DEEP BLUE TECH UI</div>
+        </div>
+        <div class="top-actions">
+          <label class="sound-toggle">
+            <span>声音提醒</span>
+            <span class="switch">
+              <input type="checkbox" id="soundToggle">
+              <span class="track"></span><span class="knob"></span>
+            </span>
+          </label>
+          <span class="pill"><span class="dot"></span> 已同步</span>
+          <span class="pill" id="liveClock">--:--:--</span>
+        </div>
+      </div>
+
+      <!-- 视图：时钟 -->
+      <section class="view active" id="view-clock">
+        <div class="clock-stage">
+          <div class="clock-card">
+            <div class="clock-time">
+              <span id="hh">00</span><span class="colon">:</span><span id="mm">00</span><span class="sec" id="ss">00</span>
+            </div>
+            <div class="clock-date" id="dateLine">2026年1月1日 星期四</div>
+            <div class="clock-loc"><span class="dot"></span> 本地时间 · 已同步系统时间</div>
+          </div>
+          <div class="side-stack">
+            <div class="mini-card">
+              <h3>下一个闹钟</h3>
+              <div class="next-alarm" id="nextAlarm">--:--<small id="nextAlarmSub">暂无启用的闹钟</small></div>
+            </div>
+            <div class="mini-card">
+              <h3>今日安排</h3>
+              <div id="todayList"></div>
+            </div>
+          </div>
+        </div>
+        <p class="footer-note">提示：点击左侧导航切换「时钟 / 闹钟 / 计时 / 秒表」模块。新建闹钟请到「闹钟」页。</p>
+      </section>
+
+      <!-- 视图：闹钟 -->
+      <section class="view" id="view-alarms">
+        <div class="view-head">
+          <h2>我的闹钟</h2>
+          <button class="btn btn-primary" id="btnNew">＋ 新建闹钟</button>
+        </div>
+        <div class="alarm-grid" id="alarmGrid"></div>
+      </section>
+
+      <!-- 视图：添加 / 编辑闹钟 -->
+      <section class="view" id="view-form">
+        <div class="view-head">
+          <h2 id="formTitle">新建闹钟</h2>
+          <button class="btn" id="btnBack">← 返回</button>
+        </div>
+        <div class="form-grid">
+          <div class="field">
+            <label>时间</label>
+            <input class="input" type="time" id="fTime" value="07:00">
+          </div>
+          <div class="field">
+            <label>标签名称</label>
+            <input class="input" type="text" id="fLabel" placeholder="例如：起床 / 会议提醒" value="起床">
+          </div>
+          <div class="field full">
+            <label>重复</label>
+            <div class="chip-row" id="fDays">
+              <span class="chip" data-day="0">一</span><span class="chip" data-day="1">二</span>
+              <span class="chip" data-day="2">三</span><span class="chip" data-day="3">四</span>
+              <span class="chip" data-day="4">五</span><span class="chip" data-day="5">六</span>
+              <span class="chip" data-day="6">日</span>
+              <span class="chip quick" data-quick="all">每天</span>
+              <span class="chip quick" data-quick="wd">工作日</span>
+              <span class="chip quick" data-quick="we">周末</span>
+            </div>
+          </div>
+          <div class="field full">
+            <label>铃声</label>
+            <div class="ringtone-row">
+              <select class="select" id="fRingtone"></select>
+              <input type="file" id="fRingtoneFile" accept="audio/*" hidden>
+              <button class="btn" id="btnUploadRingtone" type="button">＋ 上传音频</button>
+            </div>
+            <div class="ringtone-list" id="ringtoneList"></div>
+          </div>
+          <div class="field">
+            <label>贪睡</label>
+            <select class="select" id="fSnooze"><option value="on">开启 · 5 分钟</option><option value="off">关闭</option></select>
+          </div>
+          <div class="field">
+            <label>音量</label>
+            <select class="select" id="fVolume">
+              <option value="70">70%</option><option value="40">40%</option><option value="100">100%</option>
+            </select>
+          </div>
+        </div>
+        <div class="btn-row">
+          <button class="btn btn-primary" id="btnSave">保存闹钟</button>
+          <button class="btn" id="btnCancel">取消</button>
+        </div>
+      </section>
+
+      <!-- 视图：计时器 -->
+      <section class="view" id="view-timer">
+        <div class="ring-wrap">
+          <div>
+            <div class="ring">
+              <svg height="320" width="320">
+                <circle cx="160" cy="160" fill="none" r="140" stroke="rgba(120,160,255,.12)" stroke-width="10"/>
+                <circle cx="160" cy="160" fill="none" id="timerArc" r="140" stroke="url(#g)" stroke-dasharray="879" stroke-dashoffset="220" stroke-linecap="round" stroke-width="10"/>
+                <defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#00d4ff"/><stop offset="1" stop-color="#3b82f6"/></linearGradient></defs>
+              </svg>
+              <div class="center"><div class="t" id="timerText">25:00</div><div class="c">专注计时</div></div>
+            </div>
+            <div class="ctrl-row">
+              <button class="ctrl" id="timerReset" title="重置"><svg fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path d="M3 12a9 9 0 109-9 9 9 0 00-7 3.5M3 4v4h4"/></svg></button>
+              <button class="ctrl main" id="timerBtn" title="开始"><svg fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg></button>
+              <button class="ctrl" id="timerPause" title="暂停"><svg fill="currentColor" viewBox="0 0 24 24"><path d="M7 5h4v14H7zM13 5h4v14h-4z"/></svg></button>
+            </div>
+            <div class="preset-row">
+              <span class="chip" data-min="25">25 分</span>
+              <span class="chip" data-min="5">5 分</span>
+              <span class="chip" data-min="10">10 分</span>
+              <span class="chip" data-min="45">45 分</span>
+              <span class="chip" data-min="60">60 分</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 视图：秒表 -->
+      <section class="view" id="view-stopwatch">
+        <div class="ring-wrap">
+          <div>
+            <div class="ring">
+              <svg height="320" width="320">
+                <circle cx="160" cy="160" fill="none" r="140" stroke="rgba(120,160,255,.12)" stroke-width="10"/>
+                <circle cx="160" cy="160" fill="none" id="swArc" r="140" stroke="url(#g)" stroke-dasharray="879" stroke-dashoffset="879" stroke-linecap="round" stroke-width="10"/>
+              </svg>
+              <div class="center"><div class="t" id="swText">00:00.00</div><div class="c">秒表</div></div>
+            </div>
+            <div class="ctrl-row">
+              <button class="ctrl" id="swLap" title="计圈"><svg fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 8v4l3 2"/></svg></button>
+              <button class="ctrl main" id="swBtn" title="开始"><svg fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg></button>
+              <button class="ctrl" id="swReset" title="重置"><svg fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path d="M3 12a9 9 0 109-9 9 9 0 00-7 3.5M3 4v4h4"/></svg></button>
+            </div>
+            <div class="lap-list" id="lapList"></div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+  <div class="toast-fallback" id="fallback"></div>
+  <script src="app.js"></script>
+</body>
+</html>

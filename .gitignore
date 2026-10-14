@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# PyInstaller
+build/
+dist/
+# 保留 build.spec（打包入口）
+!build.spec
+
+# 运行期生成的数据/日志（用户本地）
+alarms.json
+settings.json
+holidays.json
+chronos.log
+error.log
+ringtones/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
