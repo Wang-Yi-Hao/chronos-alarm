@@ -517,6 +517,54 @@ def save_settings(settings):
     os.replace(tmp, SETTINGS_FILE)
 
 
+# ---------------------------------------------------------------- 开机自启
+AUTOSTART_REG_PATH = r"Software\Microsoft\Windows\CurrentVersion\Run"
+AUTOSTART_NAME = "ChronosAlarm"  # 注册表 Run 项名称（ASCII，避免编码问题）
+
+
+def get_autostart():
+    """读取当前用户「开机自启」注册表项是否存在且指向本程序。"""
+    try:
+        import winreg
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, AUTOSTART_REG_PATH) as key:
+            val, _ = winreg.QueryValueEx(key, AUTOSTART_NAME)
+        return bool(val and val.strip())
+    except FileNotFoundError:
+        return False
+    except Exception:
+        return False
+
+
+def set_autostart(enabled):
+    """启用/禁用开机自启：在 HKCU/.../Run 写入/删除本程序路径（带 --hidden 静默启动）。
+
+    仅在打包后的 exe 形态下生效（开发模式 python 解释器路径无意义，直接跳过）。
+    返回是否成功。
+    """
+    try:
+        import winreg
+    except Exception:
+        return False
+    if not getattr(sys, "frozen", False):
+        return False
+    exe = os.path.abspath(sys.executable)
+    cmd = '"{}" --hidden'.format(exe)
+    try:
+        key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, AUTOSTART_REG_PATH, 0, winreg.KEY_SET_VALUE)
+        if enabled:
+            winreg.SetValueEx(key, AUTOSTART_NAME, 0, winreg.REG_SZ, cmd)
+        else:
+            try:
+                winreg.DeleteValue(key, AUTOSTART_NAME)
+            except FileNotFoundError:
+                pass
+        winreg.CloseKey(key)
+        return True
+    except Exception:
+        return False
+
+
+
 # ---------------------------------------------------------------- 单实例
 def acquire_single_instance():
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)

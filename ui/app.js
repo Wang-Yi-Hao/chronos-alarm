@@ -19,6 +19,7 @@ const MOCK = (() => {
   ];
   let nextId = 6;
   let muted = true;
+  let autostart = false;
   let ringtones = [
     { name: '霓虹脉冲.wav', custom: false },
     { name: '深海回响.wav', custom: false },
@@ -32,8 +33,9 @@ const MOCK = (() => {
       const en = alarms.filter(a => a.enabled);
       return ok(en.length ? { has: true, time: en[0].time, label: en[0].label, repeat: repeatShort(en[0]), remaining: '8 小时 12 分' } : { has: false });
     },
-    get_settings: () => ok({ muted }),
+    get_settings: () => ok({ muted, autostart }),
     set_muted: (m) => { muted = !!m; return ok({ muted }); },
+    set_autostart: (a) => { autostart = !!a; return ok({ autostart }); },
     add_alarm: (time, label, days, ringtone, snooze, volume, chinaWorkday) => {
       alarms.push({ id: nextId++, time, label, enabled: true, days, once: false, china_workday: !!chinaWorkday, ringtone, snooze, volume });
       return ok(alarms.map(a => ({ ...a })));
@@ -338,6 +340,20 @@ function bindSound() {
   };
 }
 
+/* ---------- 开机自启 ---------- */
+function bindAutostart() {
+  const sw = $('autostartToggle');
+  API.get_settings().then(s => { sw.checked = !!s.autostart; }).catch(() => {});
+  sw.onchange = () => {
+    API.set_autostart(sw.checked).then(r => {
+      if (r && r.ok === false) {
+        sw.checked = !sw.checked; // 失败回滚
+        alert('开机自启设置失败（可能需要以管理员身份运行，或系统禁止写入启动项）。');
+      }
+    }).catch(() => { sw.checked = !sw.checked; });
+  };
+}
+
 /* ---------- 铃声 ---------- */
 function populateRingtones(selectedName) {
   API.get_ringtones().then(list => {
@@ -421,6 +437,7 @@ function initUI() {
   bindTimer();
   bindStopwatch();
   bindSound();
+  bindAutostart();
   bindRingtoneUpload();
   populateRingtones();
   // 列表事件委托

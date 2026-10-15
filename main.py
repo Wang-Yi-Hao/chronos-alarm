@@ -19,6 +19,7 @@ from core import (
     next_fire, active_today, repeat_label, fmt_remaining, fmt_next,
     show_toast, acquire_single_instance, next_id, selftest,
     get_ringtones, upload_ringtone, delete_ringtone, play_alarm_sound,
+    get_autostart, set_autostart,
 )
 
 if getattr(sys, "frozen", False):
@@ -133,12 +134,19 @@ class ChronosAPI:
         }
 
     def get_settings(self):
-        return {"muted": bool(self.settings.get("muted", True))}
+        return {
+            "muted": bool(self.settings.get("muted", True)),
+            "autostart": get_autostart(),
+        }
 
     def set_muted(self, muted):
         self.settings["muted"] = bool(muted)
         save_settings(self.settings)
         return self.get_settings()
+
+    def set_autostart(self, enabled):
+        ok = set_autostart(bool(enabled))
+        return {"autostart": get_autostart(), "ok": ok}
 
     def add_alarm(self, time, label, days, ringtone="霓虹脉冲", snooze=False, volume=70, china_workday=False):
         try:
@@ -438,6 +446,9 @@ def main(argv):
     if "--test-notify" in argv:
         return 0 if show_toast("测试通知", "如果你看到了这条 Windows 通知，闹钟提醒功能就正常。") else 1
 
+    # --hidden：开机自启等场景使用，窗口初始隐藏，仅驻留系统托盘
+    start_hidden = "--hidden" in argv
+
     if not os.path.exists(HTML_PATH):
         print("[chronos] 找不到 ui/index.html，请确认目录结构。")
         return 1
@@ -458,6 +469,7 @@ def main(argv):
         width=1100,
         height=720,
         min_size=(920, 600),
+        hidden=start_hidden,
     )
     # 系统托盘：关闭窗口改为最小化到托盘
     setup_tray(window, api)
