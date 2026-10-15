@@ -268,6 +268,7 @@ body::before {
 .ring-ico { width:34px;height:34px;border-radius:10px;display:grid;place-items:center;background:rgba(0,212,255,.10);color:var(--cyan-400); flex:none; }
 
 .footer-note { margin-top: var(--sp-8); font-size: var(--fs-xs); color: var(--text-faint); letter-spacing:.5px; }
+.alarm-hint { margin: var(--sp-3) 0 var(--sp-6); padding: var(--sp-4) var(--sp-5); background: rgba(34,211,238,.08); border: 1px solid rgba(34,211,238,.22); border-radius: var(--radius-md, 10px); font-size: var(--fs-xs); color: var(--text-muted); letter-spacing:.4px; line-height: 1.7; }
 
 /* ============================================================
    闹钟列表

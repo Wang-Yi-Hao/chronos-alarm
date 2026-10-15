@@ -7,6 +7,7 @@
 """
 import base64
 import json
+import logging
 import math
 import os
 import shutil
@@ -361,6 +362,54 @@ def active_today(alarm, now=None):
     return nf is not None and nf.date() == now.date()
 
 
+def is_due_now(alarm, now=None, grace_minutes=5):
+    """闹钟在 now 这一刻是否应当响：已启用、时间为今天且在 [HH:MM, +grace) 窗口内、当天符合重复规则。
+
+    用于系统计划任务触发的无窗口模式——任务在 HH:MM 整点唤醒，此时“下次触发”已不算未来，
+    故不能再用 active_today/next_fire 判断，而要用“今天是否在时间窗内 + 星期/调休匹配”来判断。
+    """
+    now = now or datetime.now()
+    if not alarm.get("enabled", True):
+        return False
+    try:
+        hour, minute = (int(x) for x in alarm["time"].split(":"))
+    except Exception:
+        return False
+    moment = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    if not (moment <= now < moment + timedelta(minutes=grace_minutes)):
+        return False
+    if alarm.get("once"):
+        return True
+    if alarm.get("china_workday"):
+        return is_china_workday(now.date())
+    days = alarm.get("days") or []
+    return now.weekday() in days
+
+
+# ---------------------------------------------------------------- 已响记录（跨进程去重）
+# 运行中的检查线程与系统计划任务触发的无窗口进程是不同进程，靠此落盘记录避免同一分钟重复响。
+FIRED_FILE = os.path.join(DATA_DIR, ".alarm_fired.json")
+
+
+def load_fired():
+    try:
+        with open(FIRED_FILE, "r", encoding="utf-8") as fh:
+            d = json.load(fh)
+        return d if isinstance(d, dict) else {}
+    except Exception:
+        return {}
+
+
+def save_fired(d):
+    try:
+        tmp = FIRED_FILE + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump(d, fh, ensure_ascii=False)
+        os.replace(tmp, FIRED_FILE)
+    except Exception:
+        pass
+
+
 def fmt_remaining(delta):
     seconds = max(0, int(delta.total_seconds()))
     hours, rest = divmod(seconds, 3600)
@@ -562,6 +611,77 @@ def set_autostart(enabled):
         return True
     except Exception:
         return False
+
+
+# ---------------------------------------------------------------- 系统任务计划（关机/关闭软件后仍能响）
+# 思路：每个启用的闹钟在 Windows 任务计划程序里注册一个「每天 HH:MM」的任务，
+# 动作是启动本程序 --alarm <id>（无窗口静默模式）。即使软件被关闭或刚重启（配合开机自启），
+# 到点也由系统唤醒本程序完成提醒；与正在运行的检查线程通过单实例锁去重，不会重复响。
+ALARM_TASK_PREFIX = "ChronosAlarm_"
+
+
+def _schtasks(*args):
+    try:
+        r = subprocess.run(["schtasks", *args], capture_output=True, text=True, timeout=30)
+        return r.returncode == 0, (r.stdout + r.stderr).strip()
+    except Exception as e:  # 包括 timeout
+        return False, str(e)
+
+
+def register_alarm_task(alarm):
+    """为启用的闹钟注册/覆盖更新一个每日 HH:MM 的计划任务。禁用或开发模式则删除。"""
+    if not alarm.get("enabled"):
+        return unregister_alarm_task(alarm["id"])
+    if not getattr(sys, "frozen", False):
+        return False
+    exe = os.path.abspath(sys.executable)
+    task_name = ALARM_TASK_PREFIX + str(int(alarm["id"]))
+    hhmm = alarm.get("time", "00:00")
+    cmd = '"{}" --alarm {}'.format(exe, int(alarm["id"]))
+    ok, out = _schtasks(
+        "/create", "/tn", task_name, "/tr", cmd,
+        "/sc", "daily", "/st", hhmm, "/f", "/it", "/rl", "limited",
+    )
+    if not ok:
+        logging.warning("[task] register failed %s: %s", task_name, out)
+    return ok
+
+
+def unregister_alarm_task(alarm_id):
+    task_name = ALARM_TASK_PREFIX + str(int(alarm_id))
+    ok, _ = _schtasks("/delete", "/tn", task_name, "/f")
+    return ok
+
+
+def list_alarm_task_ids():
+    ids = set()
+    ok, out = _schtasks("/query", "/fo", "csv", "/nh")
+    if not ok:
+        return ids
+    for line in out.splitlines():
+        if ALARM_TASK_PREFIX in line:
+            name = line.split(",")[0].strip().strip('"')
+            if name.startswith(ALARM_TASK_PREFIX):
+                try:
+                    ids.add(int(name[len(ALARM_TASK_PREFIX):]))
+                except ValueError:
+                    pass
+    return ids
+
+
+def sync_alarm_tasks(alarms):
+    """根据当前闹钟列表增删系统任务，使计划任务与启用状态一致。仅打包形态生效。"""
+    if not getattr(sys, "frozen", False):
+        return
+    try:
+        wanted = {int(a["id"]) for a in alarms if a.get("enabled")}
+        for tid in list_alarm_task_ids() - wanted:
+            unregister_alarm_task(tid)
+        for a in alarms:
+            if a.get("enabled"):
+                register_alarm_task(a)
+    except Exception as e:
+        logging.warning("[task] sync failed: %s", e)
 
 
 

@@ -16,10 +16,11 @@ import webview
 
 from core import (
     load_alarms, save_alarms, load_settings, save_settings,
-    next_fire, active_today, repeat_label, fmt_remaining, fmt_next,
+    next_fire, active_today, is_due_now, repeat_label, fmt_remaining, fmt_next,
     show_toast, acquire_single_instance, next_id, selftest,
     get_ringtones, upload_ringtone, delete_ringtone, play_alarm_sound,
-    get_autostart, set_autostart,
+    get_autostart, set_autostart, sync_alarm_tasks,
+    load_fired, save_fired,
 )
 
 if getattr(sys, "frozen", False):
@@ -174,6 +175,7 @@ class ChronosAPI:
             })
             self._next_id += 1
             save_alarms(self.alarms)
+        self._sync_tasks()
         return self.get_alarms()
 
     def update_alarm(self, alarm_id, fields):
@@ -207,6 +209,7 @@ class ChronosAPI:
                         a["enabled"] = bool(fields["enabled"])
                     save_alarms(self.alarms)
                     break
+        self._sync_tasks()
         return self.get_alarms()
 
     def toggle_alarm(self, alarm_id):
@@ -216,13 +219,22 @@ class ChronosAPI:
                     a["enabled"] = not a["enabled"]
                     save_alarms(self.alarms)
                     break
+        self._sync_tasks()
         return self.get_alarms()
 
     def delete_alarm(self, alarm_id):
         with self.lock:
             self.alarms = [a for a in self.alarms if a["id"] != alarm_id]
             save_alarms(self.alarms)
+        self._sync_tasks()
         return self.get_alarms()
+
+    def _sync_tasks(self):
+        """闹钟增删改后，同步 Windows 计划任务（启用→注册，禁用/删除→移除）。"""
+        try:
+            sync_alarm_tasks(self.alarms)
+        except Exception:
+            logging.exception("[task] 同步计划任务失败")
 
     def test_notify(self):
         return show_toast("测试通知", "如果你看到了这条 Windows 通知，闹钟提醒功能就正常。",
@@ -248,6 +260,8 @@ class ChronosAPI:
     def run_checker(self):
         while not self._stop.is_set():
             now = datetime.now()
+            stamp = now.strftime("%Y-%m-%d %H:%M")
+            fired = load_fired()
             with self.lock:
                 alarms = list(self.alarms)
             for a in alarms:
@@ -256,8 +270,7 @@ class ChronosAPI:
                 nf = next_fire(a, now)
                 if nf is None or nf > now:
                     continue
-                stamp = now.strftime("%Y-%m-%d %H:%M")
-                if self._last_fired.get(a["id"]) == stamp:
+                if self._last_fired.get(a["id"]) == stamp or fired.get(str(a["id"])) == stamp:
                     continue
                 self._fire(a)
             self._stop.wait(1.0)
@@ -270,7 +283,15 @@ class ChronosAPI:
         show_toast(title, body, silent=True)
         if not muted:
             play_alarm_sound(a.get("ringtone", "霓虹脉冲"), volume=a.get("volume", 70), muted=False)
-        self._last_fired[a["id"]] = datetime.now().strftime("%Y-%m-%d %H:%M")
+        stamp = datetime.now().strftime("%Y-%m-%d %H:%M")
+        self._last_fired[a["id"]] = stamp
+        # 同步写落到磁盘的已响记录，避免主程序退出瞬间与计划任务触发的无窗口进程重复响
+        try:
+            fired = load_fired()
+            fired[str(a["id"])] = stamp
+            save_fired(fired)
+        except Exception:
+            pass
         # 贪睡：开启声音且开启贪睡时，5 分钟后再提醒一次
         if a.get("snooze") and not muted:
             def snooze():
@@ -440,11 +461,69 @@ def _already_running():
     webview.start(gui="edgechromium")
 
 
+def fire_alarm_headless(alarm_id):
+    """由系统计划任务触发的无窗口静默模式：仅当主程序未运行时才真正提醒，避免重复响。
+
+    与主程序共用单实例锁：若锁已被主程序持有（程序正在运行），直接退出，交给它的检查线程；
+    否则判断是否“此刻该响”（is_due_now + 已响记录跨进程去重），该响则弹通知+铃声后退出。
+    """
+    lock = acquire_single_instance()
+    if lock is None:
+        logging.info("[alarm] 主程序正在运行，跳过（由检查线程负责响铃）")
+        return 0
+    try:
+        try:
+            aid = int(alarm_id)
+        except (TypeError, ValueError):
+            return 1
+        now = datetime.now()
+        stamp = now.strftime("%Y-%m-%d %H:%M")
+        fired = load_fired()
+        if fired.get(str(aid)) == stamp:
+            logging.info("[alarm] 闹钟 id=%d 本分钟已响过，跳过", aid)
+            return 0
+        alarms = load_alarms()
+        a = next((x for x in alarms if x["id"] == aid), None)
+        if a and is_due_now(a, now):
+            settings = load_settings()
+            muted = bool(settings.get("muted", True))
+            show_toast("闹钟", a.get("label") or "时间到了", silent=muted)
+            if not muted:
+                play_alarm_sound(a.get("ringtone", "霓虹脉冲"), volume=a.get("volume", 70), muted=False)
+            fired[str(aid)] = stamp
+            save_fired(fired)
+            # 仅一次：响过即停用，并同步移除此闹钟的系统任务
+            if a.get("once"):
+                a["enabled"] = False
+                save_alarms(alarms)
+                try:
+                    sync_alarm_tasks(alarms)
+                except Exception:
+                    logging.exception("[task] 同步失败")
+            logging.info("[alarm] 已触发闹钟 id=%d（静默模式）", aid)
+        else:
+            logging.info("[alarm] 闹钟 id=%d 此刻不该响，跳过", aid)
+        return 0
+    finally:
+        try:
+            lock.close()
+        except Exception:
+            pass
+
+
 def main(argv):
     if "--selftest" in argv:
         return selftest()
     if "--test-notify" in argv:
         return 0 if show_toast("测试通知", "如果你看到了这条 Windows 通知，闹钟提醒功能就正常。") else 1
+
+    # --alarm <id>：由 Windows 计划任务触发，无窗口静默提醒
+    if "--alarm" in argv:
+        try:
+            idx = argv.index("--alarm")
+            return fire_alarm_headless(argv[idx + 1])
+        except (IndexError, ValueError):
+            return 1
 
     # --hidden：开机自启等场景使用，窗口初始隐藏，仅驻留系统托盘
     start_hidden = "--hidden" in argv
@@ -460,6 +539,12 @@ def main(argv):
 
     api = ChronosAPI()
     threading.Thread(target=api.run_checker, daemon=True).start()
+
+    # 启动时对系统计划任务做一次对账，确保与当前启用的闹钟一致
+    try:
+        sync_alarm_tasks(api.alarms)
+    except Exception:
+        logging.exception("[task] 启动对账失败")
 
     url = Path(HTML_PATH).as_uri()
     window = webview.create_window(
