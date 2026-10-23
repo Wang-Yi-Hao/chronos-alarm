@@ -28,6 +28,141 @@ else:
 
 DATA_DIR = APP_DIR
 DATA_FILE = os.path.join(DATA_DIR, "alarms.json")
+
+# ---------------- 时间校准（SNTP） ----------------
+# 启动/开机自启时向 NTP 服务器取标准时间：
+#   1) 程序内部所有「现在」都走 current_time()，用偏移量校准，无需管理员权限；
+#   2) 偏差超过阈值时尝试把本机系统时间也改过来（需要管理员权限，失败只记日志）。
+NTP_SERVERS = ("ntp.aliyun.com", "ntp.tencent.com", "cn.pool.ntp.org", "time.windows.com")
+NTP_EPOCH_DELTA = 2208988800  # 1900-01-01 到 1970-01-01 的秒数
+TIME_SYNC_MIN_SHIFT = 1.5     # 偏差超过该值才写回系统时间
+TIME_SYNC_INTERVAL = 2 * 3600  # 后台复查间隔（秒）
+
+_time_offset = 0.0
+_time_sync_state = {
+    "synced": False,
+    "offset": 0.0,
+    "server": None,
+    "at": None,
+    "system_time_set": False,
+    "error": None,
+}
+
+
+def current_time():
+    """校准后的当前时间（服务器时间）。闹钟判定必须全部走这里。"""
+    off = _time_offset
+    if not off:
+        return datetime.now()
+    return datetime.now() + timedelta(seconds=off)
+
+
+def time_offset():
+    return _time_offset
+
+
+def time_sync_state():
+    return dict(_time_sync_state)
+
+
+def _ntp_query(host, timeout=1.5):
+    """查询单个 SNTP 服务器，返回服务器与本机的时间差（秒）。失败返回 None。"""
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.settimeout(timeout)
+    try:
+        pkt = bytearray(48)
+        pkt[0] = 0x1B  # LI=0, VN=3, Mode=3(client)
+        t1 = time.time()
+        sock.sendto(bytes(pkt), (host, 123))
+        data, _ = sock.recvfrom(1024)
+        t4 = time.time()
+        if len(data) < 48:
+            return None
+        sec, frac = struct.unpack("!II", data[40:48])
+        if sec == 0:
+            return None
+        server_ts = sec - NTP_EPOCH_DELTA + frac / float(1 << 32)
+        # 简化 NTP 算法（假定服务器收发间隔可忽略）
+        return server_ts - (t1 + t4) / 2.0
+    except Exception:
+        return None
+    finally:
+        try:
+            sock.close()
+        except Exception:
+            pass
+
+
+def set_system_time(target_dt):
+    """把本机时间设为 target_dt。需要管理员权限，失败返回 False。"""
+    import ctypes
+    from ctypes import wintypes
+
+    class SYSTEMTIME(ctypes.Structure):
+        _fields_ = [
+            ("wYear", wintypes.WORD), ("wMonth", wintypes.WORD), ("wDayOfWeek", wintypes.WORD),
+            ("wDay", wintypes.WORD), ("wHour", wintypes.WORD), ("wMinute", wintypes.WORD),
+            ("wSecond", wintypes.WORD), ("wMilliseconds", wintypes.WORD),
+        ]
+
+    st = SYSTEMTIME()
+    st.wYear = target_dt.year
+    st.wMonth = target_dt.month
+    st.wDayOfWeek = target_dt.weekday()
+    st.wDay = target_dt.day
+    st.wHour = target_dt.hour
+    st.wMinute = target_dt.minute
+    st.wSecond = target_dt.second
+    st.wMilliseconds = target_dt.microsecond // 1000
+    try:
+        if ctypes.windll.kernel32.SetLocalTime(ctypes.byref(st)):
+            return True
+        logging.warning("[time] SetLocalTime 失败，错误码 %s（通常是没有管理员权限）",
+                        ctypes.get_last_error() or ctypes.GetLastError())
+        return False
+    except Exception:
+        logging.exception("[time] 设置系统时间异常")
+        return False
+
+
+def sync_time(apply_system_clock=True, timeout=1.5):
+    """向 NTP 服务器校时并缓存偏移量，返回同步状态。"""
+    global _time_offset
+    offset = None
+    used = None
+    for host in NTP_SERVERS:
+        off = _ntp_query(host, timeout=timeout)
+        if off is not None:
+            offset, used = off, host
+            break
+    if offset is None:
+        _time_sync_state.update({"synced": False, "error": "所有时间服务器均不可达"})
+        logging.warning("[time] 校时失败：所有 NTP 服务器均不可达")
+        return time_sync_state()
+
+    _time_offset = offset
+    system_set = False
+    if apply_system_clock and abs(offset) >= TIME_SYNC_MIN_SHIFT:
+        system_set = set_system_time(datetime.now() + timedelta(seconds=offset))
+        if system_set:
+            # 系统时间已经改对，偏移量归零，后续直接用系统时间
+            _time_offset = 0.0
+            logging.info("[time] 已同步本机系统时间（原偏差 %+.2fs）", offset)
+        else:
+            logging.warning("[time] 本机系统时间同步失败（需要管理员权限），改用程序内偏移校准 %+.2fs", offset)
+    else:
+        logging.info("[time] 校时成功：%s，偏差 %+.2fs（无需调整）", used, offset)
+
+    _time_sync_state.update({
+        "synced": True,
+        "offset": round(offset if not system_set else 0.0, 3),
+        "raw_offset": round(offset, 3),
+        "server": used,
+        "at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "system_time_set": system_set,
+        "error": None,
+    })
+    return time_sync_state()
 SETTINGS_FILE = os.path.join(DATA_DIR, "settings.json")
 RINGTONES_DIR = os.path.join(DATA_DIR, "ringtones")
 PRESET_RINGTONES = ["霓虹脉冲", "深海回响", "星轨", "无声震动"]
@@ -269,9 +404,12 @@ def delete_ringtone(name):
 
 
 def _play_media_ps(path, volume):
-    """使用 PowerShell + WPF MediaPlayer 异步播放音频（支持 wav/mp3 等）。"""
+    """使用 PowerShell + WPF MediaPlayer 异步播放音频（支持 wav/mp3 等）。
+
+    返回 Popen 句柄（可 terminate 提前停止播放），失败返回 None。
+    """
     if not os.path.exists(path):
-        return False
+        return None
     vol = max(0, min(100, int(volume or 70))) / 100.0
     escaped = path.replace("'", "''")
     script = """
@@ -287,23 +425,22 @@ while ((-not $done) -and ((Get-Date) -lt $timeout)) { Start-Sleep -Milliseconds 
 $player.Close()
 """ % (escaped, vol)
     try:
-        subprocess.Popen(
+        return subprocess.Popen(
             ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script],
             creationflags=NO_WINDOW,
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
-        return True
     except Exception as exc:
         print("[audio] 播放失败: %r" % (exc,))
-        return False
+        return None
 
 
-def play_alarm_sound(ringtone, volume=70, muted=False):
-    """触发闹钟时播放选中的铃声；静音时直接返回。"""
+def start_alarm_sound(ringtone, volume=70, muted=False):
+    """开始播放闹钟铃声，返回进程句柄（供「停止」终止）；静音或失败返回 None。"""
     if muted:
-        return False
+        return None
     ensure_ringtones_dir()
     if not ringtone:
         ringtone = PRESET_RINGTONES[0] + ".wav"
@@ -313,7 +450,12 @@ def play_alarm_sound(ringtone, volume=70, muted=False):
         path = os.path.join(RINGTONES_DIR, os.path.basename(ringtone) + ".wav")
     if os.path.exists(path):
         return _play_media_ps(path, volume)
-    return False
+    return None
+
+
+def play_alarm_sound(ringtone, volume=70, muted=False):
+    """触发闹钟时播放选中的铃声；静音时直接返回。"""
+    return bool(start_alarm_sound(ringtone, volume=volume, muted=muted))
 
 
 # ---------------------------------------------------------------- 时间计算
@@ -324,13 +466,25 @@ def next_fire(alarm, now=None):
     - 中国工作日（china_workday=True）：按国务院放假调休查找下一个工作日。
     - 周期（days）：向后查找 60 天内首个落在允许星期内的时刻。
     """
-    now = now or datetime.now()
+    now = now or current_time()
     try:
         hour, minute = (int(x) for x in alarm["time"].split(":"))
     except Exception:
         return None
     candidate = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
     if alarm.get("once"):
+        only = alarm.get("once_date")
+        if only:
+            try:
+                day = datetime.strptime(str(only), "%Y-%m-%d").date()
+            except Exception:
+                day = None
+            if day is not None:
+                # 已固定日期的仅一次闹钟：过了那天就永不再响
+                if day < now.date():
+                    return None
+                moment = candidate.replace(year=day.year, month=day.month, day=day.day)
+                return moment if moment > now else None
         for offset in range(8):
             moment = candidate + timedelta(days=offset)
             if moment > now:
@@ -353,9 +507,32 @@ def next_fire(alarm, now=None):
     return None
 
 
+def stamp_once_date(alarm, now=None):
+    """一次性闹钟：把"下一次触发"的日期固定下来，避免错过当天之后每天都重复响。"""
+    if not alarm.get("once"):
+        alarm.pop("once_date", None)
+        return alarm
+    probe = dict(alarm)
+    probe.pop("once_date", None)
+    nf = next_fire(probe, now)
+    if nf is None:
+        alarm.pop("once_date", None)
+    else:
+        alarm["once_date"] = nf.strftime("%Y-%m-%d")
+    return alarm
+
+
+def expired_once(alarm, now=None):
+    """仅一次闹钟且目标日期已过 → 应自动停用。"""
+    if not alarm.get("once") or not alarm.get("enabled", True):
+        return False
+    nf = next_fire(alarm, now)
+    return nf is None
+
+
 def active_today(alarm, now=None):
     """该闹钟今天是否会响（已启用且下次触发是今天）。"""
-    now = now or datetime.now()
+    now = now or current_time()
     if not alarm.get("enabled", True):
         return False
     nf = next_fire(alarm, now)
@@ -368,7 +545,7 @@ def is_due_now(alarm, now=None, grace_minutes=5):
     用于系统计划任务触发的无窗口模式——任务在 HH:MM 整点唤醒，此时“下次触发”已不算未来，
     故不能再用 active_today/next_fire 判断，而要用“今天是否在时间窗内 + 星期/调休匹配”来判断。
     """
-    now = now or datetime.now()
+    now = now or current_time()
     if not alarm.get("enabled", True):
         return False
     try:
@@ -379,6 +556,13 @@ def is_due_now(alarm, now=None, grace_minutes=5):
     if not (moment <= now < moment + timedelta(minutes=grace_minutes)):
         return False
     if alarm.get("once"):
+        only = alarm.get("once_date")
+        if only:
+            try:
+                if datetime.strptime(str(only), "%Y-%m-%d").date() != now.date():
+                    return False
+            except Exception:
+                pass
         return True
     if alarm.get("china_workday"):
         return is_china_workday(now.date())
@@ -505,6 +689,7 @@ def _normalize(item):
         "enabled": bool(item.get("enabled", True)),
         "days": days,
         "once": once,
+        **({"once_date": str(item["once_date"])} if once and item.get("once_date") else {}),
         "china_workday": china_workday,
         "ringtone": str(item.get("ringtone") or "霓虹脉冲"),
         "snooze": bool(item.get("snooze", False)),
@@ -545,7 +730,7 @@ def next_id(alarms):
 
 # ---------------------------------------------------------------- 设置
 def load_settings():
-    """读取全局设置，缺省：静音（muted=True）。"""
+    """读取全局设置，缺省：静音（muted=True）。保留其它字段（如 hover 配置 widget）。"""
     defaults = {"muted": True}
     if not os.path.exists(SETTINGS_FILE):
         return defaults
@@ -553,7 +738,10 @@ def load_settings():
         with open(SETTINGS_FILE, "r", encoding="utf-8") as fh:
             data = json.load(fh)
         if isinstance(data, dict):
-            return {"muted": bool(data.get("muted", True))}
+            out = dict(defaults)
+            out.update(data)
+            out["muted"] = bool(data.get("muted", True))
+            return out
     except Exception:
         pass
     return defaults
@@ -731,6 +919,17 @@ def selftest():
         check("once future -> today",
               next_fire({"time": "10:00", "once": True}, now)
               == datetime(2026, 10, 14, 10, 0))
+        # 仅一次 + 已固定目标日期：过期后不再响，未被误顺延
+        check("once_date expired -> None",
+              next_fire({"time": "07:30", "once": True, "once_date": "2026-10-13"}, now) is None)
+        check("once_date today -> today",
+              next_fire({"time": "10:00", "once": True, "once_date": "2026-10-14"}, now)
+              == datetime(2026, 10, 14, 10, 0))
+        check("stamp_once_date past time -> tomorrow",
+              stamp_once_date({"time": "07:30", "once": True}, now).get("once_date") == "2026-10-15")
+        check("expired_once True after date passed",
+              expired_once({"time": "07:30", "once": True, "enabled": True,
+                            "once_date": "2026-10-13"}, now) is True)
         check("weekdays -> tomorrow",
               next_fire({"time": "07:30", "days": [0, 1, 2, 3, 4]}, now)
               == datetime(2026, 10, 15, 7, 30))

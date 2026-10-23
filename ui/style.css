@@ -192,6 +192,9 @@ body::before {
   display: inline-flex; align-items: center; gap: 6px;
 }
 .pill .dot { width:7px;height:7px;border-radius:99px;background:var(--success); box-shadow:0 0 10px var(--success); }
+.pill-ok .dot { background: var(--cyan-500, #00d4ff); box-shadow: 0 0 10px var(--cyan-500, #00d4ff); }
+.pill-warn { border-color: rgba(255,181,71,.45); color: var(--warning); }
+.pill-warn .dot { background: var(--warning); box-shadow: 0 0 10px var(--warning); }
 
 /* 声音提醒开关（顶栏） */
 .sound-toggle { display: inline-flex; align-items: center; gap: 8px; font-size: var(--fs-xs); color: var(--text-muted); }
@@ -305,6 +308,16 @@ body::before {
 }
 .alarm-item:hover { border-color: var(--border-strong); transform: translateY(-2px); box-shadow: var(--shadow-md); }
 .alarm-item.off { opacity: .55; }
+/* 悬浮窗跳转过来时的高亮定位 */
+.alarm-item.flash {
+  border-color: var(--cyan-500);
+  box-shadow: 0 0 0 2px rgba(0, 212, 255, .28), 0 0 32px rgba(0, 212, 255, .35);
+  animation: flashPulse 1.2s ease-in-out 2;
+}
+@keyframes flashPulse {
+  0%, 100% { box-shadow: 0 0 0 2px rgba(0, 212, 255, .2), 0 0 18px rgba(0, 212, 255, .25); }
+  50%      { box-shadow: 0 0 0 2px rgba(0, 212, 255, .5), 0 0 40px rgba(0, 212, 255, .5); }
+}
 .alarm-time { font-family: var(--font-mono); font-size: var(--fs-3xl); color: var(--text-strong); font-weight: 700; order: 1; }
 .alarm-item.off .alarm-time { color: var(--text-faint); }
 .alarm-switch { order: 2; cursor: pointer; }
@@ -335,6 +348,18 @@ body::before {
 }
 .input[type=time] { font-family: var(--font-mono); letter-spacing: 1px; }
 .input:focus, .select:focus { outline:none; border-color: var(--cyan-500); box-shadow: 0 0 0 3px rgba(0,212,255,.14); }
+/* 时间选择器：时 / 分 两个下拉 */
+.time-picker { display:flex; align-items:center; gap: var(--sp-2); }
+.time-picker .select {
+  font-family: var(--font-mono); font-size: var(--fs-xl); letter-spacing: 1px;
+  text-align: center; padding: 10px 30px 10px 12px;
+  background-position: calc(100% - 16px) 20px, calc(100% - 11px) 20px;
+}
+.time-picker .time-colon {
+  font-family: var(--font-mono); font-size: var(--fs-xl); font-weight: 700;
+  color: var(--cyan-400); text-shadow: var(--glow-cyan);
+}
+.field-hint { margin: 0; font-size: var(--fs-xs); color: var(--text-muted); }
 .select { appearance:none; background-image: linear-gradient(45deg, transparent 50%, var(--text-muted) 50%), linear-gradient(135deg, var(--text-muted) 50%, transparent 50%); background-position: calc(100% - 18px) 18px, calc(100% - 13px) 18px; background-size: 5px 5px, 5px 5px; background-repeat:no-repeat; }
 .chip-row { display:flex; gap:8px; flex-wrap:wrap; }
 .chip {

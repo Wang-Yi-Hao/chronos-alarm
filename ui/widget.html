@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>Chronos 悬浮窗</title>
+<link rel="stylesheet" href="widget.css">
+</head>
+<body class="mode-expanded">
+<!-- 展开态 -->
+<div class="widget" id="widget">
+  <div class="w-inner">
+    <header class="w-head pywebview-drag-region">
+      <span class="dot"></span>
+      <span class="brand">CHRONOS</span>
+      <div class="acts">
+        <button class="ico" data-act="pin" id="btnPin" title="置顶">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M9 4h6l-1 6 3.5 3.5H6.5L10 10 9 4z"/><path d="M12 13.5V20"/>
+          </svg>
+        </button>
+        <button class="ico" data-act="collapse" id="btnCollapse" title="折叠">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M6 15l6-6 6 6"/>
+          </svg>
+        </button>
+      </div>
+    </header>
+
+    <!-- 鼠标悬停控制条：拖动柄 + 操作提示 + 完整图标组 -->
+    <div class="hover-bar pywebview-drag-region" id="hoverBar">
+      <span class="grip"><i></i><i></i><i></i><i></i><i></i><i></i></span>
+      <span class="hint">按住拖动 · 双击折叠</span>
+      <div class="hb-acts">
+        <button class="ico sm" data-act="pin" id="btnPin2" title="置顶">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M9 4h6l-1 6 3.5 3.5H6.5L10 10 9 4z"/><path d="M12 13.5V20"/>
+          </svg>
+        </button>
+        <button class="ico sm" data-act="collapse" id="btnCollapse2" title="折叠">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M6 15l6-6 6 6"/>
+          </svg>
+        </button>
+        <button class="ico sm close" data-act="hide" id="btnHide" title="隐藏悬浮窗">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M6 6l12 12M18 6L6 18"/>
+          </svg>
+        </button>
+      </div>
+    </div>
+
+    <div class="w-clock pywebview-drag-region" id="clockBox">
+      <span class="hm" id="hm">09:43</span><span class="sec" id="sec">21</span>
+    </div>
+    <div class="w-date pywebview-drag-region" id="dateLine">10月23日 · 星期五</div>
+
+    <div class="w-ring" id="ringBox">
+      <button class="ring-btn stop" id="btnStop">停止</button>
+      <button class="ring-btn snooze" id="btnSnooze">贪睡 5 分钟</button>
+    </div>
+
+    <div class="w-divider pywebview-drag-region"></div>
+
+    <div class="w-list-head pywebview-drag-region">
+      <span id="listTitle">已开启的闹钟</span>
+      <span class="badge" id="badge">3</span>
+    </div>
+
+    <div class="w-list" id="list"></div>
+
+    <div class="w-empty" id="empty" hidden>
+      <svg class="empty-ico" viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="24" cy="24" r="17" stroke-dasharray="3 4"/>
+        <path d="M18.5 33h11"/>
+        <path d="M24 13a6.5 6.5 0 016.5 6.5v4.2l2.2 3.1H15.3l2.2-3.1v-4.2A6.5 6.5 0 0124 13z"/>
+        <path d="M24 13v-2.2"/>
+        <path d="M14 34L34 14"/>
+      </svg>
+      <p class="empty-t">暂无已开启的闹钟</p>
+      <p class="empty-s">在 Chronos 主窗口里开启一个试试</p>
+      <button class="ghost" id="btnOpen">打开 Chronos</button>
+    </div>
+  </div>
+</div>
+
+<!-- 折叠态 -->
+<div class="compact pywebview-drag-region" id="compact">
+  <span class="c-clock">
+    <span class="c-time" id="cTime">09:43</span><span class="c-sec" id="cSec">21</span>
+  </span>
+  <span class="c-sep"></span>
+  <div class="c-mid">
+    <span class="c-label">下一个</span>
+    <span class="c-next" id="cNext">12:15 午休散步</span>
+  </div>
+  <button class="ico" id="btnExpand" title="展开">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M6 9l6 6 6-6"/>
+    </svg>
+  </button>
+</div>
+
+<div class="tip" id="tip"></div>
+<script src="widget.js"></script>
+</body>
+</html>

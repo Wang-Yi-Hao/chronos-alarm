@@ -36,8 +36,8 @@ const MOCK = (() => {
     get_settings: () => ok({ muted, autostart }),
     set_muted: (m) => { muted = !!m; return ok({ muted }); },
     set_autostart: (a) => { autostart = !!a; return ok({ autostart }); },
-    add_alarm: (time, label, days, ringtone, snooze, volume, chinaWorkday) => {
-      alarms.push({ id: nextId++, time, label, enabled: true, days, once: false, china_workday: !!chinaWorkday, ringtone, snooze, volume });
+    add_alarm: (time, label, days, ringtone, snooze, volume, chinaWorkday, once) => {
+      alarms.push({ id: nextId++, time, label, enabled: true, days, once: !!once, china_workday: !!chinaWorkday, ringtone, snooze, volume });
       return ok(alarms.map(a => ({ ...a })));
     },
     update_alarm: (id, fields) => {
@@ -93,8 +93,17 @@ function switchView(v) {
 }
 
 /* ---------- 实时时钟 ---------- */
+/* 服务端校时偏移：前端所有"现在"都用 Date.now()+偏移，保证显示出的是服务器时间 */
+let timeOffsetMs = 0;
+function nowDate() { return new Date(Date.now() + timeOffsetMs); }
+window.setTimeOffset = (ms) => {
+  const v = Number(ms);
+  timeOffsetMs = isFinite(v) ? v : 0;
+  try { tickClock(); } catch (e) {}
+};
+
 function tickClock() {
-  const d = new Date();
+  const d = nowDate();
   $('hh').textContent = pad(d.getHours());
   $('mm').textContent = pad(d.getMinutes());
   $('ss').textContent = pad(d.getSeconds());
@@ -102,11 +111,41 @@ function tickClock() {
   $('dateLine').textContent = `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日 星期${WEEKDAY_CN[(d.getDay() + 6) % 7]}`;
 }
 
+/* 顶栏/时钟页的校时状态展示 */
+function applyTimeSyncUI(t) {
+  if (!t) return;
+  const pill = $('timeSyncPill');
+  const loc = $('clockLoc');
+  if (t.synced) {
+    const off = Number(t.raw_offset || 0);
+    const sign = off >= 0 ? '+' : '';
+    const offTxt = Math.abs(off) < 0.5 ? '' : ` ${sign}${off.toFixed(1)}s`;
+    if (pill) {
+      pill.className = 'pill pill-ok';
+      pill.innerHTML = `<span class="dot"></span> 已校时${offTxt}`;
+      pill.title = `服务器 ${t.server} · ${t.at}`
+        + (t.system_time_set ? ' · 已同步本机系统时间' : ' · 系统时间未改动（需管理员权限）');
+    }
+    if (loc) {
+      loc.innerHTML = `<span class="dot"></span> 服务器时间 · ${t.server}`
+        + (t.system_time_set ? ' · 已同步系统时间' : '');
+    }
+    if (typeof t.offset === 'number') window.setTimeOffset(Math.round(t.offset * 1000));
+  } else if (t.error) {
+    if (pill) {
+      pill.className = 'pill pill-warn';
+      pill.innerHTML = '<span class="dot"></span> 校时失败';
+      pill.title = t.error;
+    }
+    if (loc) loc.innerHTML = '<span class="dot"></span> 本地时间（未校时）';
+  }
+}
+
 /* ---------- 闹钟列表 ---------- */
 function repeatShort(a) {
+  if (a.once) return '仅一次';
   if (a.china_workday) return '工作日（调休）';
   const days = (a.days || []).slice().sort((x, y) => x - y);
-  if (a.once) return '仅一次';
   if (!days.length) return '未设置';
   if (days.length === 7) return '每天';
   if (days.join() === '0,1,2,3,4') return '工作日';
@@ -179,12 +218,54 @@ async function refreshAll() {
     const list = await API.get_alarms();
     renderAlarms(list);
     await refreshClockPanel();
+    const s = await API.get_settings();
+    applyTimeSyncUI(s && s.time_sync);
   } catch (e) { /* ignore */ }
 }
 
 /* ---------- 表单 ---------- */
 let editingId = null;
 let formChinaWorkday = false;
+let formOnce = false;
+
+/* 时间：小时 / 分钟 两个下拉（替代原生 time 输入） */
+function initTimeSelects() {
+  const h = $('fHour'), m = $('fMinute');
+  if (!h || !m) return;
+  let ho = '', mo = '';
+  for (let i = 0; i < 24; i++) ho += `<option value="${i}">${pad(i)} 时</option>`;
+  for (let i = 0; i < 60; i++) mo += `<option value="${i}">${pad(i)} 分</option>`;
+  h.innerHTML = ho;
+  m.innerHTML = mo;
+}
+function getFormTime() {
+  const h = parseInt($('fHour').value, 10) || 0;
+  const m = parseInt($('fMinute').value, 10) || 0;
+  return `${pad(h)}:${pad(m)}`;
+}
+function setFormTime(t) {
+  const [hs, ms] = String(t || '07:00').split(':');
+  const h = Math.min(23, Math.max(0, parseInt(hs, 10) || 0));
+  const m = Math.min(59, Math.max(0, parseInt(ms, 10) || 0));
+  $('fHour').value = String(h);
+  $('fMinute').value = String(m);
+}
+
+/* 仅一次：与星期选择互斥 */
+function setOnce(v) {
+  formOnce = !!v;
+  if (formOnce) {
+    setChinaWorkday(false);  // 仅一次与「工作日（调休）」互斥
+    setDays([]);             // 一次性不需要星期，清空避免误导
+  }
+  document.querySelectorAll('#fDays .chip[data-quick="once"]')
+    .forEach(c => c.classList.toggle('selected', formOnce));
+  $('onceHint').style.display = formOnce ? 'block' : 'none';
+  document.querySelectorAll('#fDays .chip[data-day]').forEach(c => {
+    c.style.opacity = formOnce ? '.45' : '1';
+    c.style.pointerEvents = formOnce ? 'none' : '';
+  });
+}
 
 function selectedDays() {
   return Array.from(document.querySelectorAll('#fDays .chip[data-day].selected'))
@@ -205,9 +286,14 @@ function bindDayChips() {
     chip.addEventListener('click', () => {
       if (chip.dataset.quick) {
         const q = chip.dataset.quick;
+        if (q === 'once') {
+          setOnce(!formOnce);
+          return;
+        }
         const all = [0,1,2,3,4,5,6];
         const wd = [0,1,2,3,4];
         const we = [5,6];
+        setOnce(false);
         if (q === 'wd') {
           // 工作日：按中国调休日历计算，前端只存标志，显示为周一到周五
           const already = formChinaWorkday && wd.every(d => document.querySelector(`#fDays .chip[data-day="${d}"]`).classList.contains('selected'));
@@ -227,6 +313,7 @@ function bindDayChips() {
       } else {
         chip.classList.toggle('selected');
         setChinaWorkday(false);
+        setOnce(false);
       }
     });
   });
@@ -239,10 +326,11 @@ function goForm(id) {
     API.get_alarms().then(list => {
       const a = list.find(x => x.id === id);
       if (a) {
-        $('fTime').value = a.time;
+        setFormTime(a.time);
         $('fLabel').value = a.label;
         setChinaWorkday(a.china_workday);
         setDays(a.china_workday ? [0,1,2,3,4] : (a.days || []));
+        setOnce(a.once);
         populateRingtones(a.ringtone || '霓虹脉冲');
         $('fSnooze').value = a.snooze ? 'on' : 'off';
         $('fVolume').value = String(a.volume || 70);
@@ -250,10 +338,11 @@ function goForm(id) {
     });
   } else {
     $('formTitle').textContent = '新建闹钟';
-    $('fTime').value = '07:00';
+    setFormTime('07:00');
     $('fLabel').value = '起床';
     setChinaWorkday(true);
     setDays([0,1,2,3,4]);
+    setOnce(false);
     populateRingtones('霓虹脉冲');
     $('fSnooze').value = 'off';
     $('fVolume').value = '70';
@@ -262,18 +351,18 @@ function goForm(id) {
 }
 
 async function saveForm() {
-  const time = $('fTime').value || '07:00';
+  const time = getFormTime();
   const label = ($('fLabel').value || '').trim() || '闹钟';
   const days = selectedDays();
-  if (!days.length && !formChinaWorkday) { showFallback('请至少选择一天'); return; }
+  if (!formOnce && !days.length && !formChinaWorkday) { showFallback('请选择重复规则（或选「仅一次」）'); return; }
   const ringtone = $('fRingtone').value;
   const snooze = $('fSnooze').value === 'on';
-  const volume = parseInt($('fVolume').value, 10) || 70;
+  const volume = parseInt($('fVolume').value, 10) || 0;
   try {
     if (editingId) {
-      await API.update_alarm(editingId, { time, label, days, china_workday: formChinaWorkday, ringtone, snooze, volume });
+      await API.update_alarm(editingId, { time, label, days, china_workday: formChinaWorkday, ringtone, snooze, volume, once: formOnce });
     } else {
-      await API.add_alarm(time, label, days, ringtone, snooze, volume, formChinaWorkday);
+      await API.add_alarm(time, label, days, ringtone, snooze, volume, formChinaWorkday, formOnce);
     }
     await refreshAll();
     switchView('alarms');
@@ -339,6 +428,40 @@ function bindSound() {
     API.set_muted(!sw.checked).catch(() => {});
   };
 }
+
+/* ---------- 桌面悬浮窗开关 ---------- */
+function bindWidgetToggle() {
+  const sw = $('widgetToggle');
+  if (!sw) return;
+  API.get_settings().then(s => {
+    sw.checked = s.widget_visible !== false;
+    if (s.widget_enabled === false) {
+      sw.checked = false;
+      sw.disabled = true;
+    }
+  }).catch(() => {});
+  sw.onchange = () => {
+    const p = sw.checked ? API.widget_show() : API.widget_hide();
+    Promise.resolve(p).catch(() => { sw.checked = !sw.checked; });
+  };
+  // 悬浮窗自己点了隐藏时，同步这里的开关
+  window.onWidgetVisibility = (v) => { sw.checked = !!v; };
+}
+
+/* 悬浮窗点击某条闹钟：跳到主窗口并定位到它 */
+function focusAlarm(id) {
+  switchView('alarms');
+  const paint = () => {
+    const el = document.querySelector(`.alarm-item[data-id="${id}"]`);
+    if (!el) return;
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    el.classList.add('flash');
+    setTimeout(() => el.classList.remove('flash'), 2400);
+  };
+  if (typeof refreshAll === 'function') refreshAll().then(() => setTimeout(paint, 120)).catch(paint);
+  else setTimeout(paint, 200);
+}
+window.focusAlarm = focusAlarm;
 
 /* ---------- 开机自启 ---------- */
 function bindAutostart() {
@@ -415,7 +538,8 @@ function bindRingtoneUpload() {
   $('ringtoneList').addEventListener('click', (e) => {
     const t = e.target;
     if (t.dataset.play) {
-      API.play_ringtone(t.dataset.play, parseInt($('fVolume').value, 10) || 70).catch(() => {});
+      const vol = parseInt($('fVolume').value, 10);
+      API.play_ringtone(t.dataset.play, isNaN(vol) ? 70 : vol).catch(() => {});
     } else if (t.dataset.del) {
       API.delete_ringtone(t.dataset.del).then(list => {
         renderRingtoneTags(list);
@@ -423,6 +547,24 @@ function bindRingtoneUpload() {
       }).catch(() => {});
     }
   });
+}
+
+/* ---------- 时间校准：点击顶栏状态可提权把系统时间改成服务器时间 ---------- */
+function bindTimeSyncPill() {
+  const pill = $('timeSyncPill');
+  if (!pill) return;
+  pill.style.cursor = 'pointer';
+  pill.title = '点击以管理员身份把本机系统时间同步到服务器时间';
+  pill.onclick = () => {
+    if (!API.sync_system_time_elevated) return;
+    pill.innerHTML = '<span class="dot"></span> 等待授权…';
+    API.sync_system_time_elevated()
+      .then((r) => {
+        refreshAll();
+        if (r && !r.ok) alert('系统时间同步未完成：可能是取消了管理员授权，或当前环境不允许修改系统时间。');
+      })
+      .catch(() => refreshAll());
+  };
 }
 
 /* ---------- 初始化 ---------- */
@@ -433,11 +575,14 @@ function initUI() {
   $('btnBack').onclick = () => switchView('alarms');
   $('btnCancel').onclick = () => switchView('alarms');
   $('btnSave').onclick = saveForm;
+  initTimeSelects();
   bindDayChips();
   bindTimer();
   bindStopwatch();
   bindSound();
   bindAutostart();
+  bindWidgetToggle();
+  bindTimeSyncPill();
   bindRingtoneUpload();
   populateRingtones();
   // 列表事件委托
@@ -470,15 +615,31 @@ function initUI() {
   refreshAll();
 }
 
-function boot() {
-  API = (window.pywebview && window.pywebview.api) ? window.pywebview.api : MOCK;
+/* pywebview 注入的 api 晚于页面脚本（注入发生在 window.onload 之后），
+   因此不能按“此刻有没有 window.pywebview”立即判定，必须等待 + 轮询兜底。 */
+let booted = false;
+function launch(api) {
+  if (booted) return;
+  booted = true;
+  API = api;
   initUI();
 }
-
-if (window.pywebview && window.pywebview.api) {
-  boot();
-} else if (window.pywebview) {
-  window.addEventListener('pywebviewready', boot);
-} else {
-  document.addEventListener('DOMContentLoaded', boot);
+function boot() {
+  if (booted) return;
+  if (window.pywebview && window.pywebview.api) { launch(window.pywebview.api); return; }
+  let tries = 0;
+  const tick = () => {
+    if (booted) return;
+    if (window.pywebview && window.pywebview.api) { launch(window.pywebview.api); return; }
+    if (++tries > 60) { launch(MOCK); return; }   // 约 3 秒仍未就绪：按浏览器预览处理
+    setTimeout(tick, 50);
+  };
+  window.addEventListener('pywebviewready', tick);
+  tick();
 }
+
+function startBoot() {
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
+  else boot();
+}
+startBoot();
