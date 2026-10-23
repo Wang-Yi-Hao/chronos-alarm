@@ -582,11 +582,15 @@ class ChronosAPI:
     def widget_toggle_on_top(self):
         on_top = not bool(self._widget_cfg().get("on_top", True))
         self._save_widget_cfg(on_top=on_top)
-        if self._widget_win is not None:
+        win = self._widget_win
+        if win is not None:
             try:
-                self._widget_win.on_top = on_top
+                win.on_top = on_top
             except Exception:
                 logging.exception("[widget] 切换置顶失败")
+            # 双保险：Win32 直接设一次，确保切换立即生效
+            _set_widget_topmost(win, on_top)
+            logging.info("[widget] 置顶 -> %s", "开" if on_top else "关")
         return self.widget_state()
 
     def widget_hover(self, inside):
@@ -1032,6 +1036,52 @@ def _snap_widget_position(x, y, w, h):
     return nx, ny
 
 
+def _set_widget_topmost(win, on_top):
+    """用 Win32 明确设置/取消置顶（比 WinForms 的 TopMost 更可控，且不激活窗口）。"""
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        # 注意：必须用 HWND(-1/-2) 包装，直接传 int -1 会被截成 0xFFFFFFFF 而失效
+        HWND_TOPMOST, HWND_NOTOPMOST = wintypes.HWND(-1), wintypes.HWND(-2)
+        SWP_NOSIZE, SWP_NOMOVE, SWP_NOACTIVATE = 0x0001, 0x0002, 0x0010
+        hwnd = wintypes.HWND(int(win.native.Handle.ToInt64()))
+        ctypes.windll.user32.SetWindowPos(
+            hwnd, HWND_TOPMOST if on_top else HWND_NOTOPMOST,
+            0, 0, 0, 0, SWP_NOSIZE | SWP_NOMOVE | SWP_NOACTIVATE)
+        return True
+    except Exception:
+        logging.exception("[widget] 设置置顶失败")
+        return False
+
+
+def _widget_topmost_guard(api):
+    """置顶保持：其它置顶窗口（播放器、聊天工具等）会盖住悬浮窗，定期重新提到最上层。
+
+    只在配置 on_top=True 且窗口可见时执行，且不抢焦点（SWP_NOACTIVATE）。
+    """
+    import ctypes
+    from ctypes import wintypes
+
+    HWND_TOPMOST = wintypes.HWND(-1)
+    SWP_NOSIZE, SWP_NOMOVE, SWP_NOACTIVATE = 0x0001, 0x0002, 0x0010
+
+    while not api._stop.wait(2.0):
+        cfg = api._widget_cfg()
+        if not cfg.get("on_top", True) or not cfg.get("visible", True):
+            continue
+        win = api._widget_win
+        if win is None:
+            continue
+        try:
+            hwnd = wintypes.HWND(int(win.native.Handle.ToInt64()))
+            ctypes.windll.user32.SetWindowPos(
+                hwnd, HWND_TOPMOST, 0, 0, 0, 0,
+                SWP_NOSIZE | SWP_NOMOVE | SWP_NOACTIVATE)
+        except Exception:
+            pass
+
+
 def _hide_widget_from_taskbar(win):
     """把悬浮窗标记为辅助窗口：不占任务栏按钮、也不出现在 Alt+Tab。
 
@@ -1117,6 +1167,8 @@ def _bind_widget_events(api, widget_win):
                 logging.info("[widget] 按配置隐藏悬浮窗（WebView2 已完成初始化）")
             except Exception:
                 logging.exception("[widget] 隐藏悬浮窗失败")
+        # 重新显示后恢复置顶（hide/show 可能丢失 topmost 状态）
+        _set_widget_topmost(widget_win, bool(api._widget_cfg().get("on_top", True)))
 
     try:
         widget_win.events.moved += on_moved
@@ -1348,6 +1400,10 @@ def main(argv):
     setup_tray(window, api)
     # 启动即校准服务器时间（开机自启同样生效）
     _start_time_sync(api)
+    # 悬浮窗置顶保持（防止被其它置顶窗口盖住）
+    if api._widget_win is not None:
+        threading.Thread(target=_widget_topmost_guard, args=(api,),
+                         name="widget-topmost", daemon=True).start()
     # 主窗口图标（标题栏/Alt-Tab）：内部起线程轮询等窗口出现，不阻塞启动
     _apply_main_icon(getattr(window, "title", None) or "Chronos 闹钟")
 
