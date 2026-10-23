@@ -225,12 +225,21 @@ def _write_ico(path, images):
 
 def main():
     sizes = [16, 20, 24, 32, 40, 48, 64, 96, 128, 256]
-    images = [render(s) for s in sizes]
-    ico_path = os.path.join(HERE, "appicon.ico")
-    _write_ico(ico_path, images)
 
+    # 先渲染 512 母版，再让所有尺寸从母版等比缩放：
+    # 早先每个尺寸单独重绘（含"小尺寸简化档"），会导致资源管理器里 16px 的图标
+    # 与任务栏 32px 的图标长得不一样，用户会以为"图标没换"。
     png_path = os.path.join(HERE, "appicon.png")
-    render(512).save(png_path)
+    master = render(512)
+    master.save(png_path)
+
+    ico_path = os.path.join(HERE, "appicon.ico")
+    frames = [master.resize((s, s), Image.LANCZOS) for s in sizes]
+    frames[-1].save(
+        ico_path, format="ICO",
+        sizes=[(s, s) for s in sizes],
+        append_images=frames[:-1],
+    )
 
     # 自检：读回 ico，确认帧尺寸齐全
     with Image.open(ico_path) as ico:
