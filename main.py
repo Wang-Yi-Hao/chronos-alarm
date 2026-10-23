@@ -106,6 +106,7 @@ class ChronosAPI:
         self._main_win = None     # 主窗口
         self._ring = None        # 当前响铃态 {seq,id,label,until,proc}
         self._ring_seq = 0
+        self._widget_collapsed_before_ring = False  # 响铃前是否折叠（结束后恢复）
         self._normalize_widget_cfg()
         self._purge_expired_once()
 
@@ -466,6 +467,9 @@ class ChronosAPI:
         }
         self._push_ring()
 
+        # 折叠状态下响铃：先展开，让用户能直接点「停止 / 贪睡」，结束后恢复折叠
+        self._widget_expand_for_ring()
+
         def watch():
             deadline = time.time() + seconds
             while time.time() < deadline:
@@ -475,6 +479,7 @@ class ChronosAPI:
             if (self._ring or {}).get("seq") == seq:
                 self._ring = None
                 self._push_ring()
+                self._widget_restore_collapsed()
 
         threading.Thread(target=watch, daemon=True).start()
 
@@ -494,6 +499,7 @@ class ChronosAPI:
         self._stop_proc()
         self._ring = None
         self._push_ring()
+        self._widget_restore_collapsed()
         return self.widget_state()
 
     def snooze_ringing(self, minutes=5):
@@ -507,6 +513,7 @@ class ChronosAPI:
         self._stop_proc()
         self._ring = None
         self._push_ring()
+        self._widget_restore_collapsed()
         if target is not None:
             def later():
                 time.sleep(max(1, int(minutes)) * 60)
@@ -546,10 +553,13 @@ class ChronosAPI:
             "time_offset": round(time_offset(), 3),
         }
 
-    def widget_toggle_collapse(self):
+    def _set_widget_collapsed(self, collapsed):
+        """把悬浮窗切换到指定折叠状态（保持所在屏幕与锚点，无变化时直接返回）。"""
         cfg = self._widget_cfg()
-        collapsed = not bool(cfg.get("collapsed", False))
-        old_h = WIDGET_HEIGHT_COLLAPSED if cfg.get("collapsed") else WIDGET_HEIGHT
+        old_collapsed = bool(cfg.get("collapsed", False))
+        if old_collapsed == bool(collapsed):
+            return
+        old_h = WIDGET_HEIGHT_COLLAPSED if old_collapsed else WIDGET_HEIGHT
         new_h = WIDGET_HEIGHT_COLLAPSED if collapsed else WIDGET_HEIGHT
         self._save_widget_cfg(collapsed=collapsed)
         win = self._widget_win
@@ -577,7 +587,26 @@ class ChronosAPI:
                              "底边" if anchored_bottom else "顶边", cur_y, new_y)
             except Exception:
                 logging.exception("[widget] 调整尺寸失败")
+
+    def widget_toggle_collapse(self):
+        self._set_widget_collapsed(not bool(self._widget_cfg().get("collapsed", False)))
         return self.widget_state()
+
+    # 折叠状态下响铃：自动展开让用户能直接停止/贪睡，结束后恢复原折叠状态
+    def _widget_expand_for_ring(self):
+        if self._widget_cfg().get("collapsed"):
+            self._widget_collapsed_before_ring = True
+            self._set_widget_collapsed(False)
+            logging.info("[widget] 响铃中自动展开悬浮窗")
+        else:
+            self._widget_collapsed_before_ring = False
+
+    def _widget_restore_collapsed(self):
+        if getattr(self, "_widget_collapsed_before_ring", False):
+            self._widget_collapsed_before_ring = False
+            self._set_widget_collapsed(True)
+            logging.info("[widget] 响铃结束，恢复折叠悬浮窗")
+
 
     def widget_toggle_on_top(self):
         on_top = not bool(self._widget_cfg().get("on_top", True))
