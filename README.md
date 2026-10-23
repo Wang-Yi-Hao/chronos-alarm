@@ -5,7 +5,8 @@
 基于资料库「闹钟」文件夹中的 **Chronos 深蓝科技风设计系统** 改造而来的桌面闹钟软件。
 
 - GitHub 仓库：[https://github.com/Wang-Yi-Hao/chronos-alarm](https://github.com/Wang-Yi-Hao/chronos-alarm)
-- 直接下载（Windows）：[Releases](https://github.com/Wang-Yi-Hao/chronos-alarm/releases) → 下载 `Chronos-v1.0.0.zip`，解压后双击 `Chronos/Chronos.exe` 即可运行
+- 直接下载（Windows）：[Releases](https://github.com/Wang-Yi-Hao/chronos-alarm/releases) → 下载最新的 `Chronos-vX.Y.Z.zip`，解压后双击 `Chronos/Chronos.exe` 即可运行
+
 用 `pywebview` 原生窗口承载这套 HTML/CSS UI，后端复用原 Windows 闹钟的核心逻辑
 （Windows Toast 通知、`alarms.json` 持久化、单实例锁、贪睡）。
 
