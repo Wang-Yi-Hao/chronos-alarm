@@ -50,6 +50,11 @@ const MOCK = (() => {
       if (a) a.enabled = !a.enabled;
       return ok(alarms.map(x => ({ ...x })));
     },
+    set_alarm_enabled: (id, enabled) => {
+      const a = alarms.find(x => x.id === id);
+      if (a) a.enabled = !!enabled;
+      return ok(alarms.map(x => ({ ...x })));
+    },
     delete_alarm: (id) => { alarms = alarms.filter(x => x.id !== id); return ok(alarms.map(x => ({ ...x }))); },
     test_notify: () => ok(true),
     get_ringtones: () => ok(ringtones.map(r => ({ ...r }))),
@@ -595,11 +600,10 @@ function initUI() {
       API.delete_alarm(parseInt(delBtn.dataset.id, 10)).then(refreshAll).catch(() => {});
       return;
     }
-    // 开关
+    // 开关：点击只负责阻断（别冒泡到卡片触发编辑），真正的开关逻辑交给下面的 change 事件
     const sw = t.closest('.alarm-switch');
     if (sw) {
       e.stopPropagation();
-      API.toggle_alarm(parseInt(sw.dataset.toggle, 10)).then(refreshAll).catch(() => {});
       return;
     }
     // 点击卡片其它区域 -> 编辑
@@ -607,6 +611,16 @@ function initUI() {
     if (item) {
       goForm(parseInt(item.dataset.id, 10));
     }
+  });
+  /* 开关必须用 change：label 内的 input 被点击时，input 自己会再派发一次 click，
+     如果监听 click 就会「开一次 + 关一次」，表现为点开后又自动关闭。 */
+  $('alarmGrid').addEventListener('change', (e) => {
+    const inp = e.target;
+    if (!inp || !inp.dataset || !inp.dataset.toggle) return;
+    if (inp.tagName !== 'INPUT') return;
+    API.set_alarm_enabled(parseInt(inp.dataset.toggle, 10), inp.checked)
+      .then(refreshAll)
+      .catch(() => refreshAll());
   });
   // 实时时钟
   tickClock();

@@ -313,6 +313,23 @@ class ChronosAPI:
         self._sync_tasks()
         return self.get_alarms()
 
+    def set_alarm_enabled(self, alarm_id, enabled):
+        """显式设置开关状态（幂等）。前端用 change 事件传目标值，避免"切换"被重复调用。"""
+        want = bool(enabled)
+        with self.lock:
+            for a in self.alarms:
+                if a["id"] == alarm_id:
+                    if bool(a.get("enabled")) == want:
+                        return self.get_alarms()   # 状态已一致，不重复落盘
+                    a["enabled"] = want
+                    if want and a.get("once"):
+                        stamp_once_date(a)
+                    save_alarms(self.alarms)
+                    logging.info("[alarm] id=%s 开关 -> %s", alarm_id, "开" if want else "关")
+                    break
+        self._sync_tasks()
+        return self.get_alarms()
+
     def delete_alarm(self, alarm_id):
         with self.lock:
             self.alarms = [a for a in self.alarms if a["id"] != alarm_id]
